@@ -8,6 +8,8 @@ import userRouter from "./src/routes/userRouter.js";
 import productRouter from "./src/routes/productRouter.js";
 import taskRouter from "./src/routes/taskRouter.js";
 import dashboardRouter from "./src/routes/dashboardRouter.js";
+import analyticsRouter from "./src/routes/analyticsRouter.js";
+import commentRouter from "./src/routes/commentRouter.js";
 
 
 const app = express();
@@ -33,6 +35,8 @@ app.use('/api/user',userRouter)
 app.use('/api/project',productRouter)
 app.use('/api/task',taskRouter)
 app.use('/api/dashboard',dashboardRouter)
+app.use('/api/analytics',analyticsRouter)
+app.use('/api/comment',commentRouter)
 
 
 

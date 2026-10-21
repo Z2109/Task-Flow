@@ -10,6 +10,8 @@ import taskRouter from "./src/routes/taskRouter.js";
 import dashboardRouter from "./src/routes/dashboardRouter.js";
 import analyticsRouter from "./src/routes/analyticsRouter.js";
 import commentRouter from "./src/routes/commentRouter.js";
+import notificationRouter from "./src/routes/notificationRouter.js";
+import teamRouter from "./src/routes/teamRouter.js";
 
 
 const app = express();
@@ -37,6 +39,8 @@ app.use('/api/task',taskRouter)
 app.use('/api/dashboard',dashboardRouter)
 app.use('/api/analytics',analyticsRouter)
 app.use('/api/comment',commentRouter)
+app.use('/api/notification',notificationRouter)
+app.use('/api/team',teamRouter)
 
 
 

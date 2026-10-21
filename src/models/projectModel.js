@@ -61,6 +61,13 @@ const projectSchema = new mongoose.Schema(
             required: true,
         },
 
+        members: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User",
+            },
+        ],
+
         status:{
             type:String,
             enum:["Active","Completed","Archived"],

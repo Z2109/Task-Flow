@@ -1,24 +1,39 @@
+
+import mongoose from "mongoose";
 import Project from "../models/projectModel.js";
 import User from "../models/userModel.js";
+import logActivity from "../services/activityLogService.js";
+
+// Helper: Record activity without failing the main operation
+const recordActivity = async (data) => {
+    try {
+        await logActivity(data);
+    } catch (error) {
+        console.error("Activity Log Error:", error.message);
+    }
+};
 
 // Add team member to project
-
 const addTeamMember = async (req, res) => {
     try {
         const { userId } = req.body;
+        const projectId = req.params.id;
 
-        // Check whether userId is provided
-
-        if (!userId) {
+        if (!mongoose.isValidObjectId(projectId)) {
             return res.status(400).json({
                 success: false,
-                message: "User ID is required",
+                message: "Invalid project ID",
             });
         }
 
-        // Find project
+        if (!userId || !mongoose.isValidObjectId(userId)) {
+            return res.status(400).json({
+                success: false,
+                message: "A valid user ID is required",
+            });
+        }
 
-        const project = await Project.findById(req.params.id);
+        const project = await Project.findById(projectId);
 
         if (!project) {
             return res.status(404).json({
@@ -27,19 +42,13 @@ const addTeamMember = async (req, res) => {
             });
         }
 
-        // Check project ownership
-
-        const projectOwnerId = String(project.owner);
-        const loggedInUserId = String(req.userId);
-
-        if (projectOwnerId !== loggedInUserId) {
+        // Only the project owner can add members
+        if (String(project.owner) !== String(req.userId)) {
             return res.status(403).json({
                 success: false,
                 message: "You are not allowed to manage this project",
             });
         }
-
-        // Check whether the user exists
 
         const user = await User.findById(userId);
 
@@ -50,19 +59,15 @@ const addTeamMember = async (req, res) => {
             });
         }
 
-        // Prevent adding the project owner as a member
-
-        if (projectOwnerId === String(userId)) {
+        if (String(project.owner) === String(user._id)) {
             return res.status(400).json({
                 success: false,
                 message: "Project owner is already part of the project",
             });
         }
 
-        // Check whether the user is already a member
-
         const alreadyMember = project.members.some(
-            (member) => String(member) === String(userId)
+            (member) => String(member) === String(user._id)
         );
 
         if (alreadyMember) {
@@ -72,54 +77,67 @@ const addTeamMember = async (req, res) => {
             });
         }
 
-        // Add member
-
+        // Save member
         project.members.push(user._id);
-
         await project.save();
+
+        // Record activity
+        await recordActivity({
+            organization: req.organizationId || project.organization,
+            user: req.userId,
+            action: "MEMBER_ADDED",
+            entityType: "Member",
+            entityId: user._id,
+            description: `${user.name} was added to project "${project.name}"`,
+        });
 
         return res.status(200).json({
             success: true,
             message: "Team member added successfully",
             project,
         });
-
     } catch (error) {
         console.error("Add Team Member Error:", error);
 
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: "Failed to add team member",
         });
     }
 };
 
-// Get Project Members
-
-const getProjectMembers = async (req,res) =>{
+// Get project members
+const getProjectMembers = async (req, res) => {
     try {
-        const project = await Project.findById(req.params.id)
-        .populate("owner", "name email")
-        .populate("members", "name email");
+        const projectId = req.params.id;
 
-        if(!project){
+        if (!mongoose.isValidObjectId(projectId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid project ID",
+            });
+        }
+
+        const project = await Project.findById(projectId)
+            .populate("owner", "name email")
+            .populate("members", "name email");
+
+        if (!project) {
             return res.status(404).json({
                 success: false,
                 message: "Project not found",
             });
         }
 
-        // Check whether the logged-in user is the owner
-
-        const isOwner = project.owner._id.toString() === String(req.userId);
-
-        // Check whether the logged-in user is a member
+        const isOwner =
+            project.owner &&
+            String(project.owner._id) === String(req.userId);
 
         const isMember = project.members.some(
-            (member) => member._id.toString() === String(req.userId)
+            (member) => String(member._id) === String(req.userId)
         );
 
-        if(!isOwner && !isMember){
+        if (!isOwner && !isMember) {
             return res.status(403).json({
                 success: false,
                 message: "You are not allowed to view this project",
@@ -133,31 +151,28 @@ const getProjectMembers = async (req,res) =>{
             members: project.members,
         });
     } catch (error) {
+        console.error("Get Project Members Error:", error);
+
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: "Failed to fetch project members",
         });
     }
 };
 
-
-// Get My Projects
-
+// Get projects owned by or assigned to the logged-in user
 const getMyProjects = async (req, res) => {
     try {
         const userId = req.userId;
 
-        // Find projects owned by the logged-in user
         const ownedProjects = await Project.find({
             owner: userId,
         }).populate("owner", "name email");
 
-        // Find projects where the user is a member
         const memberProjects = await Project.find({
             members: userId,
         }).populate("owner", "name email");
 
-        // Combine both lists
         const projects = [...ownedProjects];
 
         memberProjects.forEach((project) => {
@@ -175,54 +190,64 @@ const getMyProjects = async (req, res) => {
             totalProjects: projects.length,
             projects,
         });
-
     } catch (error) {
+        console.error("Get My Projects Error:", error);
+
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: "Failed to fetch your projects",
         });
     }
 };
 
-
 // Remove team member
-
-const removeTeamMember = async (req,res) =>{
+const removeTeamMember = async (req, res) => {
     try {
-        const project = await Project.findById(req.params.id);
+        const projectId = req.params.id;
+        const userId = req.params.userId;
 
-        if(!project){
+        if (!mongoose.isValidObjectId(projectId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid project ID",
+            });
+        }
+
+        if (!mongoose.isValidObjectId(userId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid user ID",
+            });
+        }
+
+        const project = await Project.findById(projectId);
+
+        if (!project) {
             return res.status(404).json({
                 success: false,
                 message: "Project not found",
             });
         }
 
-        // Only the project owner can remove members
-
-        if(String(project.owner) !== String(req.userId)){
+        if (String(project.owner) !== String(req.userId)) {
             return res.status(403).json({
                 success: false,
                 message: "Only the project owner can remove members",
             });
         }
 
-        const userId = req.params.userId;
-
-        // Check whether the user is a member
-
         const memberExists = project.members.some(
             (member) => String(member) === String(userId)
         );
 
-        if(!memberExists){
+        if (!memberExists) {
             return res.status(404).json({
                 success: false,
                 message: "Team member not found in this project",
             });
         }
 
-        // Remove the member
+        const user = await User.findById(userId);
 
         project.members = project.members.filter(
             (member) => String(member) !== String(userId)
@@ -230,18 +255,34 @@ const removeTeamMember = async (req,res) =>{
 
         await project.save();
 
+        // Record activity
+        await recordActivity({
+            organization: req.organizationId || project.organization,
+            user: req.userId,
+            action: "MEMBER_REMOVED",
+            entityType: "Member",
+            entityId: userId,
+            description: `${user?.name || "A user"} was removed from project "${project.name}"`,
+        });
+
         return res.status(200).json({
             success: true,
             message: "Team member removed successfully",
             members: project.members,
         });
     } catch (error) {
+        console.error("Remove Team Member Error:", error);
+
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: "Failed to remove team member",
         });
     }
-}
+};
 
-
-export { addTeamMember,getProjectMembers,getMyProjects,removeTeamMember};
+export {
+    addTeamMember,
+    getProjectMembers,
+    getMyProjects,
+    removeTeamMember,
+};

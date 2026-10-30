@@ -1,30 +1,34 @@
-import mongoose, { mongo } from "mongoose";
+
+import mongoose from "mongoose";
 
 const notificationSchema = new mongoose.Schema(
     {
-        recipient:{
+        recipient: {
             type: mongoose.Schema.Types.ObjectId,
-            ref:"User",
+            ref: "User",
             required: true,
         },
-        sender:{
+
+        sender: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
         },
 
-        title:{
+        title: {
             type: String,
             required: true,
+            trim: true,
         },
 
-        message:{
-            type:String,
-            required: true,
-        },
-
-        type:{
+        message: {
             type: String,
-            enum:[
+            required: true,
+            trim: true,
+        },
+
+        type: {
+            type: String,
+            enum: [
                 "Task Assigneed",
                 "Task Updated",
                 "Comment",
@@ -39,12 +43,12 @@ const notificationSchema = new mongoose.Schema(
             ref: "Project",
         },
 
-        task:{
+        task: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Task",
         },
 
-        isRead:{
+        isRead: {
             type: Boolean,
             default: false,
         },
@@ -54,6 +58,8 @@ const notificationSchema = new mongoose.Schema(
     }
 );
 
-const Notification = mongoose.models.Notification || mongoose.model("NotificationSchema",notificationSchema);
+const Notification =
+    mongoose.models.Notification ||
+    mongoose.model("Notification", notificationSchema);
 
 export default Notification;

@@ -1,13 +1,47 @@
+
 import express from "express";
+
+import {
+    addcomment,
+    getTaskComments,
+    deleteComment,
+    updateComment,
+} from "../controller/commentController.js";
+
 import authUser from "../middleware/auth.js";
-import { addcomment, deleteComment, getTaskComments } from "../controller/commentController.js";
-
-
+import organizationContext from "../middleware/organizationContext.js";
+import authorizePermission from "../middleware/authorizePermission.js";
 
 const commentRouter = express.Router();
 
-commentRouter.post("/:taskId",authUser,addcomment);
-commentRouter.get("/:taskId",authUser,getTaskComments);
-commentRouter.delete("/delete/:commentId",authUser,deleteComment);
+commentRouter.post(
+    "/task/:taskId",
+    authUser,
+    organizationContext,
+    authorizePermission("comment:create"),
+    addcomment
+);
+
+commentRouter.get(
+    "/task/:taskId",
+    authUser,
+    organizationContext,
+    authorizePermission("comment:read"),
+    getTaskComments
+);
+
+commentRouter.delete(
+    "/:commentId",
+    authUser,
+    organizationContext,
+    deleteComment
+);
+
+commentRouter.put(
+    "/:commentId",
+    authUser,
+    organizationContext,
+    updateComment
+);
 
 export default commentRouter;

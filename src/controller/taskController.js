@@ -1,382 +1,637 @@
+
+import mongoose from "mongoose";
 import Project from "../models/projectModel.js";
-import Task from "../models/taskModel.js"
+import Task from "../models/taskModel.js";
+import OrganizationMember from "../models/organizationMemberModel.js";
+import Notification from "../models/notificationModel.js";
+import logActivity from "../services/activityLogService.js";
 
-// create Task
-
-const createTask = async(req,res) =>{
-
+// Helper: record activity without failing the main task operation
+const recordActivity = async (data) => {
     try {
-        const{
-            title,decription,project,assignedTo,status,priority,dueDate,tags,estimatedHours,startDate,
+        await logActivity(data);
+    } catch (error) {
+        console.error("Activity logging failed:", error.message);
+    }
+};
+
+// Helper: create notification without failing the main task operation
+const createTaskNotification = async (data) => {
+    try {
+        await Notification.create(data);
+    } catch (error) {
+        console.error("Notification creation failed:", error.message);
+    }
+};
+
+// Helper: handle common database errors
+const handleError = (res, error) => {
+    console.error(error);
+
+    if (
+        error.name === "CastError" ||
+        error.name === "ValidationError"
+    ) {
+        return res.status(400).json({
+            success: false,
+            message: error.message,
+        });
+    }
+
+    return res.status(500).json({
+        success: false,
+        message: "Internal server error",
+    });
+};
+
+// Create Task
+const createTask = async (req, res) => {
+    try {
+        const {
+            title,
+            description,
+            project,
+            assignedTo,
+            status,
+            priority,
+            dueDate,
+            tags,
+            estimatedHours,
+            startDate,
         } = req.body;
 
-        if(!title || !project || !assignedTo || !dueDate){
+        if (!title || !project || !assignedTo || !dueDate) {
             return res.status(400).json({
-                success:false,
-                message:"Title, project, assignedTo and dueDate are required"
+                success: false,
+                message: "Title, project, assignedTo and dueDate are required",
             });
         }
 
-        // check project
+        if (
+            !mongoose.isValidObjectId(project) ||
+            !mongoose.isValidObjectId(assignedTo)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid project or assigned user ID",
+            });
+        }
 
         const existingProject = await Project.findOne({
-            _id:project,
-            owner: req.userId,
+            _id: project,
+            organization: req.organizationId,
+            $or: [
+                { owner: req.userId },
+                { members: req.userId },
+            ],
         });
 
-        if(!existingProject){
+        if (!existingProject) {
             return res.status(404).json({
-                success:true,
-                message:"Project not found"
+                success: false,
+                message: "Project not found or access denied",
             });
         }
 
-        // create task
+        const member = await OrganizationMember.findOne({
+            user: assignedTo,
+            organization: req.organizationId,
+            status: "active",
+        });
+
+        if (!member) {
+            return res.status(400).json({
+                success: false,
+                message: "Assigned user is not an active organization member",
+            });
+        }
 
         const task = await Task.create({
-            title,decription,project,assignedTo,createdBy:req.userId,status,priority,dueDate,tags,estimatedHours,startDate,
-        });
-
-        res.status(201).json({
-            success:true,
-            message:"Task Created Successfully", task,
-        });
-    } catch (error) {
-        res.status(500).json({
-            success:false,
-            message:error.message,
-        });
-    }
-};
-
-
-// Get all tasks
-
-const getTasks = async (req,res) => {
-    try {
-        const tasks = await Task.find({
+            title,
+            description,
+            project,
+            assignedTo,
             createdBy: req.userId,
-        })
-        .populate("project","name color")
-        .populate("assignedTo","name email")
-        .sort({createdAt: -1});
-
-        res.json({
-            success:true,
-            tasks,
+            status,
+            priority,
+            dueDate,
+            tags,
+            estimatedHours,
+            startDate,
         });
-    } catch (error) {
-        console.log(error);
 
-        res.status(500).json({
-            success:false,
-            message:error.message,
+        await recordActivity({
+            organization: req.organizationId,
+            user: req.userId,
+            action: "TASK_CREATED",
+            entityType: "Task",
+            entityId: task._id,
+            description: `Created task: ${task.title}`,
         });
-    }
-};
 
-// get single task
+        await createTaskNotification({
+            recipient: assignedTo,
+            sender: req.userId,
+            title: "New Task Assigned",
+            message: `You have been assigned a task: ${task.title}`,
+            type: "Task Assigneed",
+            project: task.project,
+            task: task._id,
+        });
 
-const getTaskbyId = async (req,res) => {
-    try {
-        const {id} = req.params;
-
-        const task = await Task.findOne({
-            _id:id,
-            createdBy:req.userId,
-        })
-        .populate("project","name color")
-        .populate("assignedTo","name email");
-
-        if(!task){
-            return res.status(404).json({
-                success:false,
-                message:"Task not found",
-            });
-        }
-
-        res.json({
-            success:true,
+        return res.status(201).json({
+            success: true,
+            message: "Task created successfully",
             task,
         });
     } catch (error) {
-        console.log(error)
-
-        res.status(500).json({
-            success:false,
-            message:error.message,
-        });
+        return handleError(res, error);
     }
 };
 
-// Update task
-
-const updateTask = async (req,res) =>{
+// Get All Tasks
+const getTasks = async (req, res) => {
     try {
-        const {id} = req.params;
+        const projects = await Project.find({
+            organization: req.organizationId,
+            $or: [
+                { owner: req.userId },
+                { members: req.userId },
+            ],
+        }).select("_id");
 
-        const{
-            title,decription,project,assignedTo,status,priority,dueDate,tags,estimatedHours,startDate,
+        const projectIds = projects.map((project) => project._id);
+
+        const tasks = await Task.find({
+            project: { $in: projectIds },
+        })
+            .populate("project", "name color")
+            .populate("assignedTo", "name email")
+            .populate("createdBy", "name email")
+            .sort({ createdAt: -1 });
+
+        return res.status(200).json({
+            success: true,
+            count: tasks.length,
+            tasks,
+        });
+    } catch (error) {
+        return handleError(res, error);
+    }
+};
+
+// Get Single Task
+const getSingleTask = async (req, res) => {
+    try {
+        // authorizedTask middleware loads and authorizes the task.
+        return res.status(200).json({
+            success: true,
+            task: req.task,
+        });
+    } catch (error) {
+        return handleError(res, error);
+    }
+};
+
+// Update Task
+const updateTask = async (req, res) => {
+    try {
+        const {
+            title,
+            description,
+            assignedTo,
+            status,
+            priority,
+            dueDate,
+            tags,
+            estimatedHours,
+            startDate,
         } = req.body;
 
-        const task = await Task.findOne({
-            _id:id,
-            createdBy: req.userId,
-        });
+        const task = req.task;
+        let newAssignee = null;
 
-        if(!task){
-            return res.status(404).json({
-                success:false,
-                message:"Task not found",
+        // Validate a new assignee if provided.
+        if (assignedTo !== undefined) {
+            if (!mongoose.isValidObjectId(assignedTo)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid assigned user ID",
+                });
+            }
+
+            const member = await OrganizationMember.findOne({
+                user: assignedTo,
+                organization: req.organizationId,
+                status: "active",
             });
-        } 
-        // update only feild that were provided
-        if(title !== undefined){
-            task.title = title;
-        }
-        if(description !== undefined){
-            task.description = description;
-        }
-        if(project !== undefined){
-            task.project = project;
-        }
-        if(assignedTo !== undefined){
+
+            if (!member) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Assigned user is not an active organization member",
+                });
+            }
+
+            const previousAssignee = task.assignedTo
+                ? task.assignedTo.toString()
+                : null;
+
+            if (previousAssignee !== assignedTo.toString()) {
+                newAssignee = assignedTo;
+            }
+
             task.assignedTo = assignedTo;
         }
-        if(priority !== undefined){
-            task.priority = priority;
+
+        if (title !== undefined) task.title = title;
+        if (description !== undefined) task.description = description;
+        if (priority !== undefined) task.priority = priority;
+        if (status !== undefined) task.status = status;
+        if (dueDate !== undefined) task.dueDate = dueDate;
+        if (tags !== undefined) task.tags = tags;
+        if (startDate !== undefined) task.startDate = startDate;
+
+        if (estimatedHours !== undefined) {
+            task.estimatedHours = estimatedHours;
         }
-        if(status !== undefined){
-            task.status = status;
-        
 
-        //  set completedAt when task is completed
+        await task.save();
 
-        if(status === "Completed"){
-            task.completedAt = new Date();
-        }else{
-            task.completedAt = null;
-        }
-    }
-
-    if(dueDate !== undefined){
-        task.dueDate = dueDate;
-    }
-    if(tags !== undefined){
-        task.tags = tags;
-    }
-    if(startDate !== undefined){
-        task.startDate = startDate;
-    }
-    if(estimatedHours !== undefined){
-        task.estimatedHours = estimatedHours;
-    }
-
-    await task.save();
-
-    res.json({
-        success:true,
-        message:"Task updated successfully",
-        task,
-    });
-
-    } catch (error) {
-        console.log(error)
-        res.status(500).json({
-            success:false,
-            message:error.message,
-        });
-    }
-};
-
-// delete task
-
-const deleteTask = async(req,res) => {
-    try {
-        const {id} = req.params;
-
-        const task = await Task.findOneAndDelete({
-            _id:id,
-            createdBy: req.userId,
+        await recordActivity({
+            organization: req.organizationId,
+            user: req.userId,
+            action: "TASK_UPDATED",
+            entityType: "Task",
+            entityId: task._id,
+            description: `Updated task: ${task.title}`,
         });
 
-        if(!task){
-            return res.status(404).json({
-                success:false,
-                message:"Task not found",
+        if (newAssignee) {
+            await createTaskNotification({
+                recipient: newAssignee,
+                sender: req.userId,
+                title: "New Task Assigned",
+                message: `You have been assigned a task: ${task.title}`,
+                type: "Task Assigneed",
+                project: task.project,
+                task: task._id,
+            });
+
+            await recordActivity({
+                organization: req.organizationId,
+                user: req.userId,
+                action: "TASK_ASSIGNED",
+                entityType: "Task",
+                entityId: task._id,
+                description: `Assigned task: ${task.title}`,
             });
         }
 
-        res.json({
-            success:true,
-            message:"Task deleted successfully",
+        return res.status(200).json({
+            success: true,
+            message: "Task updated successfully",
+            task,
         });
     } catch (error) {
-        console.log(error)
-
-        res.status(500).json({
-            success:false,
-            message:error.message,
-        });
+        return handleError(res, error);
     }
 };
 
-// update task status
-
-const updateTaskStatus = async (req,res) =>{
+// Delete Task
+const deleteTask = async (req, res) => {
     try {
-        const {id} = req.params;
-        const {status} = req.body;
+        const task = req.task;
+
+        // Save the task details before deleting it.
+        const taskId = task._id;
+        const taskTitle = task.title;
+
+        await task.deleteOne();
+
+        await recordActivity({
+            organization: req.organizationId,
+            user: req.userId,
+            action: "TASK_DELETED",
+            entityType: "Task",
+            entityId: taskId,
+            description: `Deleted task: ${taskTitle}`,
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Task deleted successfully",
+        });
+    } catch (error) {
+        return handleError(res, error);
+    }
+};
+
+// Update Task Status
+const updateTaskStatus = async (req, res) => {
+    try {
+        const { status } = req.body;
 
         const allowedStatus = [
             "Todo",
             "In Progress",
+            "Review",
             "Completed",
         ];
 
-        if(!allowedStatus.includes(status)){
+        if (!allowedStatus.includes(status)) {
             return res.status(400).json({
-                success:false,
-                message:"Invalid Task Status"
+                success: false,
+                message: "Invalid task status",
             });
         }
 
-        const updateStatus = {
-            status,
-        };
+        const task = req.task;
+        const previousStatus = task.status;
 
-        if(status === "Completed"){
-            updateData.completedAt = new Date();
-        }else{
-            updateData.completedAt = null;
-        }
+        task.status = status;
+        await task.save();
 
-        const task = await Task.findOneAndUpdate(
-            {
-                _id:id,
-                createdBy:req.userId,
-            },
-            updateData,
-            {
-                new:true,
+        if (previousStatus !== status) {
+            await recordActivity({
+                organization: req.organizationId,
+                user: req.userId,
+                action: "TASK_STATUS_UPDATED",
+                entityType: "Task",
+                entityId: task._id,
+                description: `Changed task "${task.title}" status from ${previousStatus} to ${status}`,
+            });
+
+            if (
+                task.createdBy &&
+                task.createdBy.toString() !== req.userId.toString()
+            ) {
+                await createTaskNotification({
+                    recipient: task.createdBy,
+                    sender: req.userId,
+                    title: "Task Updated",
+                    message: `Task "${task.title}" status changed to ${status}`,
+                    type: "Task Updated",
+                    project: task.project,
+                    task: task._id,
+                });
             }
-        );
-
-        if(!task){
-            return res.status(404).json({
-                success:false,
-                message:"Task not found",
-            });
         }
 
-        res.json({
-            success:true,
-            message:"Task status updated successfully",
+        return res.status(200).json({
+            success: true,
+            message: "Task status updated successfully",
             task,
         });
-
     } catch (error) {
-        console.log(error)
-        res.status(500).json({
-            success:false,
-            message:error.message,
-        });
+        return handleError(res, error);
     }
 };
 
-// get my tasks
-
-const getMyTasks = async (req,res) => {
+// Get My Tasks
+const getMyTasks = async (req, res) => {
     try {
+        const projects = await Project.find({
+            organization: req.organizationId,
+            $or: [
+                { owner: req.userId },
+                { members: req.userId },
+            ],
+        }).select("_id");
+
+        const projectIds = projects.map((project) => project._id);
+
         const tasks = await Task.find({
-            assignedTo:req.userId,
+            project: { $in: projectIds },
+            assignedTo: req.userId,
         })
+            .populate("project", "name color")
+            .populate("createdBy", "name email")
+            .sort({ dueDate: 1 });
 
-        .populate("project","name color")
-        .populate("createdBy","name email")
-        .sort({dueDate: 1})
-
-        res.json({
-            success:true,
+        return res.status(200).json({
+            success: true,
+            count: tasks.length,
             tasks,
         });
     } catch (error) {
-        console.log(error);
-
-        res.status(500).json({
-            success:false,
-            message:error.message
-        });
+        return handleError(res, error);
     }
 };
 
-// get project tasks
-
-const getProjectTasks = async (req,res) =>{
+// Get Project Tasks
+const getProjectTasks = async (req, res) => {
     try {
-        const {projectId} = req.params;
+        const { projectId } = req.params;
+
+        if (!mongoose.isValidObjectId(projectId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid project ID",
+            });
+        }
+
+        const project = await Project.findOne({
+            _id: projectId,
+            organization: req.organizationId,
+            $or: [
+                { owner: req.userId },
+                { members: req.userId },
+            ],
+        });
+
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: "Project not found or access denied",
+            });
+        }
 
         const tasks = await Task.find({
             project: projectId,
         })
-        .populate("assignedTo","name color")
-        .populate("createdBy","name email")
-        .sort({createdAt: -1});
+            .populate("assignedTo", "name email")
+            .populate("createdBy", "name email")
+            .sort({ createdAt: -1 });
 
-        res.json({
-            success:true,
+        return res.status(200).json({
+            success: true,
+            count: tasks.length,
             tasks,
-        })
-    } catch (error) {
-        console.log(error);
-
-        res.status(500).json({
-            success:false,
-            message:error.message,
         });
+    } catch (error) {
+        return handleError(res, error);
     }
 };
 
-// get task by status
-
-const getTasksByStatus = async (req,res) =>{
+// Get Tasks By Status
+const getTasksByStatus = async (req, res) => {
     try {
-        const {status} = req.params;
+        const { status } = req.params;
 
         const allowedStatus = [
             "Todo",
             "In Progress",
+            "Review",
             "Completed",
         ];
 
-        if(!allowedStatus.includes(status)){
+        if (!allowedStatus.includes(status)) {
             return res.status(400).json({
-                success:false,
-                message:"Invalid Task Status"
+                success: false,
+                message: "Invalid task status",
             });
         }
 
+        const projects = await Project.find({
+            organization: req.organizationId,
+            $or: [
+                { owner: req.userId },
+                { members: req.userId },
+            ],
+        }).select("_id");
+
+        const projectIds = projects.map((project) => project._id);
+
         const tasks = await Task.find({
-            createdBy : req.userId,
+            project: { $in: projectIds },
             status,
         })
+            .populate("project", "name color")
+            .populate("assignedTo", "name email")
+            .sort({ dueDate: 1 });
 
-        .populate("project","name color")
-        .populate("assingedTo","name email")
-        .sort({dueDate: 1});
-
-        res.json({
-            success:true,
+        return res.status(200).json({
+            success: true,
+            count: tasks.length,
             tasks,
         });
     } catch (error) {
-        console.log(error);
-        
-        res.status(500).json({
-            success:false,
-            message:error.message,
-        });
+        return handleError(res, error);
     }
 };
 
-export {createTask,getTasks,getTaskbyId,updateTask,deleteTask,updateTaskStatus,getMyTasks,getProjectTasks,getTasksByStatus}
+// Assign Task
+const assignTask = async (req, res) => {
+    try {
+        const { assignedTo } = req.body;
+
+        if (!assignedTo) {
+            return res.status(400).json({
+                success: false,
+                message: "Assigned user is required",
+            });
+        }
+
+        if (!mongoose.isValidObjectId(assignedTo)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid assigned user ID",
+            });
+        }
+
+        const task = req.task;
+
+        const member = await OrganizationMember.findOne({
+            user: assignedTo,
+            organization: req.organizationId,
+            status: "active",
+        });
+
+        if (!member) {
+            return res.status(400).json({
+                success: false,
+                message: "Assigned user is not an active organization member",
+            });
+        }
+
+        const previousAssignee = task.assignedTo
+            ? task.assignedTo.toString()
+            : null;
+
+        const assigneeChanged =
+            previousAssignee !== assignedTo.toString();
+
+        task.assignedTo = assignedTo;
+        await task.save();
+
+        if (assigneeChanged) {
+            await recordActivity({
+                organization: req.organizationId,
+                user: req.userId,
+                action: "TASK_ASSIGNED",
+                entityType: "Task",
+                entityId: task._id,
+                description: `Assigned task: ${task.title}`,
+            });
+
+            await createTaskNotification({
+                recipient: assignedTo,
+                sender: req.userId,
+                title: "New Task Assigned",
+                message: `You have been assigned a task: ${task.title}`,
+                type: "Task Assigneed",
+                project: task.project,
+                task: task._id,
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Task assigned successfully",
+            task,
+        });
+    } catch (error) {
+        return handleError(res, error);
+    }
+};
+
+// Remove Task Assignment
+const unassignTask = async (req, res) => {
+    try {
+        const task = req.task;
+        const previousAssignee = task.assignedTo;
+
+        if (!previousAssignee) {
+            return res.status(200).json({
+                success: true,
+                message: "Task is already unassigned",
+                task,
+            });
+        }
+
+        task.assignedTo = null;
+        await task.save();
+
+        await recordActivity({
+            organization: req.organizationId,
+            user: req.userId,
+            action: "TASK_UNASSIGNED",
+            entityType: "Task",
+            entityId: task._id,
+            description: `Removed assignment from task: ${task.title}`,
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Task unassigned successfully",
+            task,
+        });
+    } catch (error) {
+        return handleError(res, error);
+    }
+};
+
+export {
+    createTask,
+    getTasks,
+    getSingleTask,
+    updateTask,
+    deleteTask,
+    updateTaskStatus,
+    getMyTasks,
+    getProjectTasks,
+    getTasksByStatus,
+    assignTask,
+    unassignTask,
+};

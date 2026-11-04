@@ -1,7 +1,9 @@
 
 import mongoose from "mongoose";
 import Project from "../models/projectModel.js";
+import Task from "../models/taskModel.js";
 import logActivity from "../services/activityLogService.js";
+import OrganizationMember from "../models/organizationMemberModel.js";
 
 // Helper: Record activity without failing the project operation
 const recordActivity = async (data) => {
@@ -13,106 +15,165 @@ const recordActivity = async (data) => {
 };
 
 // Create Project
+
+
 const createProject = async (req, res) => {
-    try {
-        const {
-            name,
-            description,
-            category,
-            color,
-            priority,
-            dueDate,
-            tags,
-            coverImage,
-            isPrivate,
-            reminderEnabled,
-        } = req.body;
+  try {
+    const {
+      name,
+      description,
+      category,
+      color,
+      priority,
+      dueDate,
+      tags,
+      coverImage,
+      isPrivate,
+      reminderEnabled,
+    } = req.body;
 
-        if (!name || !name.trim()) {
-            return res.status(400).json({
-                success: false,
-                message: "Project name is required!",
-            });
-        }
+    const requestedMembers =
+      req.body.members ?? req.body.memberIds ?? [];
+      console.log("========== CREATE PROJECT DEBUG ==========");
+console.log("Logged in user:", String(req.userId));
+console.log("Organization:", String(req.organizationId));
+console.log("Received members:", requestedMembers);
+console.log("==========================================");
 
-        if (!req.organizationId) {
-            return res.status(400).json({
-                success: false,
-                message: "Organization context is required",
-            });
-        }
-
-        const project = await Project.create({
-            name: name.trim(),
-            description,
-            category,
-            color,
-            priority,
-            dueDate,
-            tags,
-            coverImage,
-            isPrivate,
-            reminderEnabled,
-            owner: req.userId,
-            organization: req.organizationId,
-        });
-
-        await recordActivity({
-            organization: req.organizationId,
-            user: req.userId,
-            action: "PROJECT_CREATED",
-            entityType: "Project",
-            entityId: project._id,
-            description: `Created project: ${project.name}`,
-        });
-
-        return res.status(201).json({
-            success: true,
-            message: "Project created successfully",
-            project,
-        });
-    } catch (error) {
-        console.error("Create project error:", error);
-
-        if (error.name === "ValidationError" || error.name === "CastError") {
-            return res.status(400).json({
-                success: false,
-                message: error.message,
-            });
-        }
-
-        return res.status(500).json({
-            success: false,
-            message: "Failed to create project",
-        });
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Project name is required",
+      });
     }
+
+    if (!req.organizationId || !req.userId) {
+      return res.status(400).json({
+        success: false,
+        message: "Organization context is required",
+      });
+    }
+
+    if (!Array.isArray(requestedMembers)) {
+      return res.status(400).json({
+        success: false,
+        message: "Members must be an array",
+      });
+    }
+
+    // Normalize IDs and remove duplicates
+    const memberIds = [
+      ...new Set(
+        requestedMembers.map((member) =>
+          String(member?._id || member)
+        )
+      ),
+    ];
+
+    // Validate IDs
+    if (memberIds.some((id) => !mongoose.isValidObjectId(id))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid employee ID",
+      });
+    }
+
+    // Never assign the project owner as a team member
+    const employeeIds = memberIds.filter(
+      (id) => id !== String(req.userId)
+    );
+
+    // Verify active organization memberships
+    const activeMembers = await OrganizationMember.find({
+        
+      organization: req.organizationId,
+      user: { $in: employeeIds },
+      status: "active",
+    }).select("user");
+    console.log(
+    "Verified active members:",
+    activeMembers.map((member) => String(member.user))
+);
+
+    if (activeMembers.length !== employeeIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Some employees are not active members of this organization",
+      });
+    }
+
+    const project = await Project.create({
+      name: name.trim(),
+      description,
+      category,
+      color,
+      priority,
+      dueDate,
+      tags,
+      coverImage,
+      isPrivate,
+      reminderEnabled,
+
+      owner: req.userId,
+      organization: req.organizationId,
+
+      members: activeMembers.map((member) => member.user),
+    });
+
+    await recordActivity({
+      organization: req.organizationId,
+      user: req.userId,
+      action: "PROJECT_CREATED",
+      entityType: "Project",
+      entityId: project._id,
+      description: `Created project: ${project.name}`,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Project created successfully",
+      project,
+    });
+
+  } catch (error) {
+    console.error("Create project error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create project",
+    });
+  }
 };
+
 
 // Get All Projects
+
 const getProjects = async (req, res) => {
-    try {
-        const projects = await Project.find({
-            organization: req.organizationId,
-            $or: [
-                { owner: req.userId },
-                { members: req.userId },
-            ],
-        }).sort({ createdAt: -1 });
+  try {
+    const projects = await Project.find({
+      organization: req.organizationId,
+      $or: [
+        { owner: req.userId },
+        { members: req.userId },
+      ],
+    }).sort({ createdAt: -1 });
 
-        return res.status(200).json({
-            success: true,
-            count: projects.length,
-            projects,
-        });
-    } catch (error) {
-        console.error("Get projects error:", error);
+    return res.status(200).json({
+      success: true,
+      count: projects.length,
+      projects,
+    });
 
-        return res.status(500).json({
-            success: false,
-            message: "Failed to fetch projects",
-        });
-    }
+  } catch (error) {
+    console.error("Get projects error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch projects",
+    });
+  }
 };
+
 
 // Get Single Project
 const getSingleProject = async (req, res) => {
@@ -275,6 +336,9 @@ const deleteProject = async (req, res) => {
 
         const projectId = project._id;
         const projectName = project.name;
+
+        // Delete associated tasks to prevent orphaned task records.
+        await Task.deleteMany({ project: projectId });
 
         await project.deleteOne();
 

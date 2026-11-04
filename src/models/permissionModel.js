@@ -11,7 +11,7 @@ const permissionSchema = new mongoose.Schema(
 
         resource:{
             type: String,
-            requried: true,
+            required: true,
         },
 
         action:{

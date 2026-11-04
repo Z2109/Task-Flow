@@ -213,4 +213,148 @@ const getProductivityAnalytics = async (req,res) =>{
     }
 }
 
-export { getAnalyticsOverview ,getProjectProgress ,getTaskStatusAnalytics ,getProductivityAnalytics};
+
+// Get Project-Specific Overview
+const getProjectOverview = async (req, res) => {
+    try {
+        const projectId = req.projectId;
+
+        // Get project details and team members
+        const project = await Project.findById(projectId)
+            .populate("owner", "name email avatar")
+            .populate("members", "name email avatar")
+            .lean();
+
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: "Project not found",
+            });
+        }
+
+        // Get all tasks belonging to this project
+        const tasks = await Task.find({
+            project: projectId,
+        })
+            .populate("assignedTo", "name email avatar")
+            .sort({ createdAt: -1 })
+            .lean();
+
+        // Task status counts
+        const statistics = {
+            totalTasks: tasks.length,
+            todoTasks: 0,
+            inProgressTasks: 0,
+            reviewTasks: 0,
+            completedTasks: 0,
+            completionPercentage: 0,
+        };
+
+        // Priority counts
+        const priority = {
+            low: 0,
+            medium: 0,
+            high: 0,
+        };
+
+        tasks.forEach((task) => {
+            switch (task.status) {
+                case "Todo":
+                    statistics.todoTasks++;
+                    break;
+
+                case "In Progress":
+                    statistics.inProgressTasks++;
+                    break;
+
+                case "Review":
+                    statistics.reviewTasks++;
+                    break;
+
+                case "Completed":
+                    statistics.completedTasks++;
+                    break;
+
+                default:
+                    break;
+            }
+
+            const taskPriority = task.priority?.toLowerCase();
+
+            if (taskPriority && Object.hasOwn(priority, taskPriority)) {
+                priority[taskPriority]++;
+            }
+        });
+
+        // Calculate completion percentage
+        statistics.completionPercentage =
+            statistics.totalTasks === 0
+                ? 0
+                : Math.round(
+                    (statistics.completedTasks / statistics.totalTasks) * 100
+                );
+
+        // Upcoming deadlines
+        const now = new Date();
+
+        const upcomingDeadlines = tasks
+            .filter(
+                (task) =>
+                    task.dueDate &&
+                    new Date(task.dueDate) >= now &&
+                    task.status !== "Completed"
+            )
+            .sort(
+                (a, b) =>
+                    new Date(a.dueDate) - new Date(b.dueDate)
+            )
+            .slice(0, 5);
+
+        // Overdue tasks
+        const overdueTasks = tasks.filter(
+            (task) =>
+                task.dueDate &&
+                new Date(task.dueDate) < now &&
+                task.status !== "Completed"
+        ).length;
+
+        // Combine project owner and members without duplicates
+        const teamMembers = [
+            project.owner,
+            ...(project.members || []),
+        ].filter(
+            (member, index, self) =>
+                member &&
+                self.findIndex(
+                    (item) =>
+                        item._id.toString() === member._id.toString()
+                ) === index
+        );
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                project,
+                statistics,
+                priority,
+                teamMembers,
+                upcomingDeadlines,
+                overdueTasks,
+                recentTasks: tasks.slice(0, 5),
+            },
+        });
+
+    } catch (error) {
+        console.error("Project overview error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to load project overview",
+            error: error.message,
+        });
+    }
+};
+
+
+
+export { getAnalyticsOverview ,getProjectProgress ,getTaskStatusAnalytics ,getProductivityAnalytics ,getProjectOverview};

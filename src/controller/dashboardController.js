@@ -244,8 +244,8 @@ export const getTaskStatistics = async (req,res) =>{
             {
                 $match:{
                     $or:[
-                        {createdby:req.userId},
-                        {assignedto: req.userId},
+                        {createdBy:req.userId},
+                        {assignedTo: req.userId},
                     ],
                 },
             },
@@ -285,7 +285,7 @@ export const getTaskStatistics = async (req,res) =>{
 
 // project Progress
 
-export const getProjectProgress = async (req,ress) =>{
+export const getProjectProgress = async (req,res) =>{
     try {
         const projects = await Project.find({
             owner: req.userId

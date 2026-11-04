@@ -5,6 +5,7 @@ import Task from "../models/taskModel.js";
 import OrganizationMember from "../models/organizationMemberModel.js";
 import Notification from "../models/notificationModel.js";
 import logActivity from "../services/activityLogService.js";
+import syncProjectStatus from "../services/projectProgressService.js";
 
 // Helper: record activity without failing the main task operation
 const recordActivity = async (data) => {
@@ -119,6 +120,8 @@ const createTask = async (req, res) => {
             estimatedHours,
             startDate,
         });
+
+        await syncProjectStatus(task.project);
 
         await recordActivity({
             organization: req.organizationId,
@@ -258,6 +261,8 @@ const updateTask = async (req, res) => {
 
         await task.save();
 
+        await syncProjectStatus(task.project);
+
         await recordActivity({
             organization: req.organizationId,
             user: req.userId,
@@ -309,6 +314,8 @@ const deleteTask = async (req, res) => {
 
         await task.deleteOne();
 
+        await syncProjectStatus(task.project);
+
         await recordActivity({
             organization: req.organizationId,
             user: req.userId,
@@ -351,6 +358,8 @@ const updateTaskStatus = async (req, res) => {
 
         task.status = status;
         await task.save();
+
+        await syncProjectStatus(task.project);
 
         if (previousStatus !== status) {
             await recordActivity({

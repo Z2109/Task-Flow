@@ -1,16 +1,5 @@
-import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config({
-    path: path.join(__dirname, ".env"),
-});
-console.log("EMAIL_USER loaded:", Boolean(process.env.EMAIL_USER));
-console.log("EMAIL_PASS loaded:", Boolean(process.env.EMAIL_PASS));
-console.log("CLIENT_URL loaded:", Boolean(process.env.CLIENT_URL));
+import "./src/config/loadEnv.js";
 
 import express from "express";
 import cors from "cors";
@@ -30,7 +19,9 @@ import roleRouter from "./src/routes/roleRoutes.js";
 import roleAssignmemntRouter from "./src/routes/roleAssignmentRouter.js";
 import errorMiddleware from "./src/middleware/errorHandling.js";
 import activityLogRouter from "./src/routes/activityLogRouter.js";
-
+import invitationRouter from "./src/routes/invitationRouter.js";
+import fileRouter from "./src/routes/fileRoutes.js";
+import permissionRouter from "./src/routes/permissionRoutes.js";
 
 
 const app = express();
@@ -41,46 +32,44 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Check environment variable
-console.log("MongoDB URL loaded:", !!process.env.MONGODB_URL);
+// Environment check
+console.log("MongoDB URL loaded:", Boolean(process.env.MONGODB_URL));
+console.log("Cloudinary configured:", Boolean(process.env.CLOUDINARY_CLOUD_NAME));
 
-// Connect MongoDB
+// Database
 connectToDb();
 
-
-
-
-
-// Api end points
-app.use('/api/user',userRouter)
-app.use('/api/project',productRouter)
-app.use('/api/task',taskRouter)
-app.use('/api/dashboard',dashboardRouter)
-app.use('/api/analytics',analyticsRouter)
-app.use('/api/comment',commentRouter)
-app.use('/api/notification',notificationRouter)
-app.use('/api/team',teamRouter)
-app.use('/api/organizations',organiationRouter)
+// API routes
+app.use("/api/user", userRouter);
+app.use("/api/projects", productRouter);
+app.use("/api/task", taskRouter);
+app.use("/api/dashboard", dashboardRouter);
+app.use("/api/analytics", analyticsRouter);
+app.use("/api/comment", commentRouter);
+app.use("/api/notification", notificationRouter);
+app.use("/api/team", teamRouter);
+app.use("/api/organizations", organiationRouter);
 app.use("/api/roles", roleRouter);
-app.use("/api/role-assignments",roleAssignmemntRouter)
+app.use("/api/role-assignments", roleAssignmemntRouter);
 app.use("/api/activity-logs", activityLogRouter);
+app.use("/api/invitations", invitationRouter);
+app.use("/api/files", fileRouter);
+app.use("/api/permissions", permissionRouter);
+app.use("/api/users", userRouter); // this is for settings
 
-// Handle unknown routes
+
+// Unknown routes
 app.use((req, res) => {
-    return res.status(404).json({
-        success: false,
-        message: `Route not found: ${req.method} ${req.originalUrl}`,
-    });
+  return res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.originalUrl}`,
+  });
 });
 
-// Centralized error handler — must be last
+// Error handler
 app.use(errorMiddleware);
-
-
-
-
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });

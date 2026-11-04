@@ -23,21 +23,48 @@ import invitationRouter from "./src/routes/invitationRouter.js";
 import fileRouter from "./src/routes/fileRoutes.js";
 import permissionRouter from "./src/routes/permissionRoutes.js";
 
-
 const app = express();
 
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// CORS configuration
+const allowedOrigins = (process.env.FRONTEND_URL || "")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests without an Origin header (Postman/server requests).
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      const normalizedOrigin = origin.replace(/\/$/, "");
+
+      if (allowedOrigins.includes(normalizedOrigin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
+  })
+);
+
 app.use(express.json());
 
-// Environment check
+// Health check
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "TaskFlow API is running",
+  });
+});
+
+// Environment checks
 console.log("MongoDB URL loaded:", Boolean(process.env.MONGODB_URL));
 console.log("Cloudinary configured:", Boolean(process.env.CLOUDINARY_CLOUD_NAME));
-
-// Database
-connectToDb();
 
 // API routes
 app.use("/api/user", userRouter);
@@ -55,8 +82,7 @@ app.use("/api/activity-logs", activityLogRouter);
 app.use("/api/invitations", invitationRouter);
 app.use("/api/files", fileRouter);
 app.use("/api/permissions", permissionRouter);
-app.use("/api/users", userRouter); // this is for settings
-
+app.use("/api/users", userRouter);
 
 // Unknown routes
 app.use((req, res) => {
@@ -69,7 +95,18 @@ app.use((req, res) => {
 // Error handler
 app.use(errorMiddleware);
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+// Start server only after database connection
+const startServer = async () => {
+  try {
+    await connectToDb();
+
+    app.listen(PORT, () => {
+      console.log(`TaskFlow server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Failed to start TaskFlow server:", error.message);
+    process.exit(1);
+  }
+};
+
+startServer();

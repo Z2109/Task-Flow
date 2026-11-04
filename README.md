@@ -6,7 +6,7 @@ TaskFlow is a full-stack SaaS project and task management platform designed to h
 
 Built with **Next.js, React, Node.js, Express, MongoDB, and Tailwind CSS**, TaskFlow provides a modern workspace for managing the complete project lifecycle.
 
-🔗 **Live Demo:** https://task-flow-frontend-virid.vercel.app
+🔗 **Live Demo:** [TaskFlow](https://task-flow-frontend-virid.vercel.app/login?utm_source=chatgpt.com)
 
 ---
 
@@ -337,7 +337,7 @@ Access is granted according to the authenticated user's organization membership 
 | Backend | Render |
 | Database | MongoDB Atlas |
 
-**Live Application:** https://task-flow-frontend-virid.vercel.app
+**Live Application:** [TaskFlow — Login](https://task-flow-frontend-virid.vercel.app/login?utm_source=chatgpt.com)
 
 **Backend Health Check:** https://taskflow-backend-i7ax.onrender.com/
 

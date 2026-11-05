@@ -22,6 +22,7 @@ import activityLogRouter from "./src/routes/activityLogRouter.js";
 import invitationRouter from "./src/routes/invitationRouter.js";
 import fileRouter from "./src/routes/fileRoutes.js";
 import permissionRouter from "./src/routes/permissionRoutes.js";
+import aiRouter from "./src/routes/aiRoutes.js";
 
 const app = express();
 
@@ -83,6 +84,7 @@ app.use("/api/invitations", invitationRouter);
 app.use("/api/files", fileRouter);
 app.use("/api/permissions", permissionRouter);
 app.use("/api/users", userRouter);
+app.use("/api/ai", aiRouter);
 
 // Unknown routes
 app.use((req, res) => {

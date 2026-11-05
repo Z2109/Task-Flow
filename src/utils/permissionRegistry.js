@@ -111,6 +111,13 @@ const permissionRegistry = [
     action: "read",
     description: "View analytics",
   },
+  // AI Assistant permissions
+{
+    key: "ai:chat",
+    resource: "ai",
+    action: "chat",
+    description: "Access the TaskFlow AI assistant",
+},
 ];
 
 export default permissionRegistry;
